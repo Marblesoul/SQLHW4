@@ -17,8 +17,6 @@ def create_clients_db(conn):
                 FOREIGN KEY (client_id) REFERENCES clients (id));
         """)
 
-        conn.commit()
-
 def add_client(conn, first_name, last_name, email):
     with conn.cursor() as cur:
         cur.execute("""
@@ -27,7 +25,6 @@ def add_client(conn, first_name, last_name, email):
             RETURNING id;
         """, (first_name, last_name, email))
         client_id = cur.fetchone()[0]
-        conn.commit()
         return client_id
 
 def add_phone(conn, client_id, phone):
@@ -36,16 +33,16 @@ def add_phone(conn, client_id, phone):
             INSERT INTO phones (client_id, phone)
             VALUES (%s, %s);
         """, (client_id, phone))
-        conn.commit()
 
 def change_client(conn, client_id, first_name, last_name, email):
     with conn.cursor() as cur:
         cur.execute("""
             UPDATE clients
-            SET first_name = %s, last_name = %s, email = %s
+            SET first_name = COALESCE(%s, first_name),
+                last_name = COALESCE(%s, last_name),
+                email = COALESCE(%s, email)
             WHERE id = %s;
         """, (first_name, last_name, email, client_id))
-        conn.commit()
 
 def delete_phone(conn, client_id, phone):
     with conn.cursor() as cur:
@@ -53,7 +50,6 @@ def delete_phone(conn, client_id, phone):
             DELETE FROM phones
             WHERE client_id = %s AND phone = %s;
         """, (client_id, phone))
-        conn.commit()
 
 def delete_client(conn, client_id):
     with conn.cursor() as cur:
@@ -65,18 +61,24 @@ def delete_client(conn, client_id):
             DELETE FROM clients
             WHERE id = %s;
         """, (client_id,))
-        conn.commit()
 
 def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT *
-            FROM clients
-            JOIN phones ON clients.id = phones.client_id
-            WHERE (first_name = %s AND last_name = %s AND email = %s) OR phone = %s;
-        """, (first_name, last_name, email, phone))
-        client = cur.fetchone()
-        return client
+        query = """
+            SELECT c.id, c.first_name, c.last_name, c.email, p.phone
+            FROM clients c
+            LEFT JOIN phones p ON c.id = p.client_id
+            WHERE (%s IS NULL OR c.first_name = %s) 
+                AND (%s IS NULL OR c.last_name = %s) 
+                AND (%s IS NULL OR c.email = %s) 
+                AND (%s IS NULL OR p.phone = %s);
+        """
+        cur.execute(query,
+                    (first_name, first_name,
+                     last_name, last_name,
+                     email, email,
+                     phone, phone))
+        return cur.fetchall()
 
 def get_client(conn, client_id):
     with conn.cursor() as cur:
@@ -108,6 +110,3 @@ if __name__ == "__main__":
         print(find_client(conn, phone="1234567891"))
         delete_phone(conn, client_1, "1234567890")
         delete_client(conn, client_2)
-
-
-    conn.close()
